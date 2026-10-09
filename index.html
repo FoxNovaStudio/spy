@@ -1,7 +1,16 @@
-<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<!doctype html>
+<html lang="fi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
 <title>Spyfall</title>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500&family=IBM+Plex+Sans:wght@400;500;600&family=Special+Elite&display=swap">
 <style>
+html,body{margin:0}
+body{-webkit-text-size-adjust:100%}
+[hidden]{display:none!important}
 /* Layout: yksi kapea sarake, jokainen näkymä on kansiolehti (dossier) jonka päällä vaihtuva leima. */
 :root{
   --bg:#e8edf2; --card:#f8fafc; --ink:#14202e; --muted:#586677; --line:#c3cfda;
@@ -116,6 +125,8 @@ ul.ll li{font-size:.92rem;padding:6px 0;border-top:1px solid var(--line);overflo
 .endimg img{display:block;width:100%;height:100%;object-fit:cover}
 </style>
 
+</head>
+<body>
 <div class="wrap" id="app"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
@@ -124,7 +135,7 @@ ul.ll li{font-size:.92rem;padding:6px 0;border-top:1px solid var(--line);overflo
 'use strict';
 
 // Public address of this page, used for the QR code. Filled in after first publish.
-var BASE = 'https://claude.ai/artifact/V3eMXqeksX5Y4fast4ExST';
+var BASE = '';
 
 var FI = [
   ['Lentokone',['Lentäjä','Lentoemäntä','Turvamies','Liikematkustaja','Pelokas matkustaja','Lapsi','Ensimmäisen luokan matkustaja']],
@@ -216,15 +227,15 @@ var fmt = function(s){ return String(Math.floor(s/60)).padStart(2,'0')+':'+Strin
 
 var room = null, roomChecked = false;
 var code = null, hosting = false, hState = null, D = null;
-var seenHost = false, hostGoneAt = 0, joinDeadline = 0, off = Infinity, lastTs = 0, lastHtml = '', tickN = 0, hostK = 0, lastLoc = -1;
+var busy = false, wake = null, spyGoneAt = 0, seenHost = false, hostGoneAt = 0, joinDeadline = 0, off = Infinity, lastTs = 0, lastHtml = '', tickN = 0, hostK = 0, lastLoc = -1;
 var revealed = false, guessing = false, guessPick = null, struck = {};
 var order = {}, orderN = 0, homeMsg = '', showLocs = false, packSel = ['fi'];
-try{ var ps0 = JSON.parse(store('spyfall-packs')||'null'); if(Array.isArray(ps0)){ ps0 = ps0.filter(function(x){return x==='fi'||x==='cl';}); if(ps0.length) packSel = ps0; } }catch(e){}
+try{ var ps0 = JSON.parse(store('spyfall-packs')||'null'); if(Array.isArray(ps0)){ ps0 = ps0.filter(function(x){return x==='fi'||x==='cl';}); if(ps0.length) packSel = [ps0[0]]; } }catch(e){}
 
 function store(k,v){ try{ if(v===undefined) return localStorage.getItem(k); localStorage.setItem(k,v); }catch(e){ return null; } }
-function hashCode(){ var m = /^#(\d{3})$/.exec(location.hash||''); return m ? m[1] : ''; }
+function hashCode(){ var m = /^#(\d{3})$/.exec(location.hash||''); if(m) return m[1]; var q = /[?&]join=(\d{3})(?:&|$)/.exec(location.search||''); return q ? q[1] : ''; }
 function newCode(){ return String(100+rand(900)); }
-function joinUrl(c){ var b = BASE || String(location.href).split('#')[0]; return b + '#' + c; }
+function joinUrl(c){ var b = BASE || String(location.href).split('#')[0].split('?')[0]; return b + '#' + c; }
 function qrSvg(text){
   try{ if(typeof qrcode!=='function') return ''; var q=qrcode(0,'M'); q.addData(text); q.make(); return q.createSvgTag({cellSize:4,margin:0,scalable:true}); }
   catch(e){ return ''; }
@@ -290,7 +301,7 @@ function hostLogic(){
   if(h.ph==='play' || h.ph==='vote'){
     if(Date.now()>=h.ends){ endGame({w:'spy', why:'time'}); return; }
     var spyId = null; for(var k in h.a) if(h.a[k]===-1) spyId=k;
-    if(spyId && !ps.some(function(p){return p.id===spyId;})){ endGame({w:'crew', why:'spyleft'}); return; }
+    if(spyId && !ps.some(function(p){return p.id===spyId;})){ if(!spyGoneAt) spyGoneAt=Date.now(); if(Date.now()-spyGoneAt>30000){ spyGoneAt=0; endGame({w:'crew', why:'spyleft'}); return; } } else { spyGoneAt=0; }
     for(var i=0;i<ps.length;i++){
       var p=ps[i], g=p.pr.gs;
       if(g && typeof g==='object' && g.r===h.r && typeof g.i==='number' && h.a[p.id]===-1){
@@ -342,14 +353,14 @@ function showHome(){
     (homeMsg ? '<p class="note">'+esc(homeMsg)+'</p>' : '')+
     '<div class="sheet">'+
       '<div><label for="name">Nimesi</label><input type="text" id="name" maxlength="14" autocomplete="nickname" value="'+esc(saved)+'"></div>'+
-      '<div><p class="lbl">Paikkakategoriat</p>'+packChips(packSel,true)+'<p class="hint" id="pkn">Valitse yksi tai useampi. Isäntä voi vaihtaa valinnan myös lobbyssa.</p></div>'+
+      '<div><p class="lbl">Kategoria</p>'+packChips(packSel,true)+'<p class="hint" id="pkn">Valitse yksi kategoria. Isäntä voi vaihtaa sen myös lobbyssa.</p></div>'+
       '<button class="btn primary" data-act="create" id="bcreate">Luo peli</button>'+
       '<div class="or">tai liity</div>'+
       '<div><label for="code">Pelin koodi</label><input type="text" id="code" maxlength="3" inputmode="numeric" pattern="[0-9]*" autocomplete="off" spellcheck="false" value="'+esc(pre)+'"></div>'+
       '<button class="btn" data-act="join" id="bjoin">Liity peliin</button>'+
       '<p class="net" id="net"></p>'+
     '</div>'+
-    '<p class="hint">Voit myös skannata isännän QR-koodin. Pelaajien täytyy olla kirjautuneena Claudeen ja avata sama pelisivu.</p>';
+    '<p class="hint">Voit myös skannata isännän QR-koodin. Kaikilla pitää olla sama pelisivu auki omalla puhelimellaan.</p>';
   updateNet();
 }
 function updateNet(){
@@ -357,13 +368,13 @@ function updateNet(){
   var dis = !room;
   ['bcreate','bjoin'].forEach(function(id){ var b=document.getElementById(id); if(b) b.disabled = dis && roomChecked; });
   if(!roomChecked){ el.textContent='Yhdistetään…'; el.className='net'; }
-  else if(!room){ el.textContent='Moninpeli ei ole käytössä tässä näkymässä. Avaa sivu kirjautuneena Claudessa.'; el.className='net bad'; }
+  else if(!room){ el.textContent='Yhteyskirjasto ei latautunut. Tarkista verkkoyhteys ja lataa sivu uudelleen.'; el.className='net bad'; }
   else { el.textContent=''; }
 }
 function packChips(sel, editable){
-  return '<div class="packs">'+PACKS.map(function(P){
+  return '<div class="packs" role="radiogroup" aria-label="Paikkakategoria">'+PACKS.map(function(P){
     var on = sel.indexOf(P.id)>=0;
-    return '<button class="chip pk'+(on?' on':'')+'" data-pk="'+P.id+'" aria-pressed="'+on+'"'+(editable?' data-act="pk:'+P.id+'"':' disabled')+'><b>'+esc(P.name)+'</b><span class="hint">'+P.locs.length+' paikkaa · '+esc(P.desc)+'</span></button>';
+    return '<button class="chip pk'+(on?' on':'')+'" data-pk="'+P.id+'" role="radio" aria-checked="'+on+'"'+(editable?' data-act="pk:'+P.id+'"':' disabled')+'><b>'+esc(P.name)+'</b><span class="hint">'+P.locs.length+' paikkaa · '+esc(P.desc)+'</span></button>';
   }).join('')+'</div>';
 }
 function locsHtml(h){
@@ -388,7 +399,7 @@ function lobbyHtml(h){
       '<p class="link">'+esc(url)+'</p>'+
       '<button class="btn small" data-act="copy" style="align-self:flex-start">Kopioi linkki</button></div>' : '')+
     '<div class="sheet"><h2>Pelaajat ('+pl.length+')</h2><ul class="pl">'+list+'</ul></div>'+
-    (amHost ? '<div class="sheet"><p class="lbl">Paikkakategoriat</p>'+packChips(h.pk||['fi'],true)+'</div>' : '<p class="hint">Kategoriat: '+esc(packLabel(h.pk))+'</p>')+
+    (amHost ? '<div class="sheet"><p class="lbl">Kategoria</p>'+packChips(h.pk||['fi'],true)+'</div>' : '<p class="hint">Kategoriat: '+esc(packLabel(h.pk))+'</p>')+
     '<button class="btn small ghost" data-act="locs">Näytä kaikki paikat ('+activeIdx(h.pk).length+')</button>'+
     (amHost
       ? '<div class="sheet"><div><label for="dur">Peliaika</label><select id="dur" data-act="dur">'+durs+'</select></div>'+
@@ -498,7 +509,7 @@ function updateTimer(){
 
 /* ---------- actions ---------- */
 function leaveGame(msg){
-  if(room) room.presence({g:null,n:null,h:null,ac:null,v:null,gs:null}).catch(function(){});
+  if(room) room.leave();
   code=null; hosting=false; hState=null; D=null; seenHost=false; hostGoneAt=0; off=Infinity; lastTs=0;
   revealed=false; guessing=false; guessPick=null; struck={}; order={}; orderN=0; showLocs=false;
   homeMsg = msg||''; showHome();
@@ -508,25 +519,38 @@ function readName(){
   if(!n){ if(el) el.focus(); homeMsgInline('Kirjoita ensin nimesi.'); return ''; }
   store('spyfall-name', n); return n;
 }
-function homeMsgInline(t){ var el=document.getElementById('net'); if(el){ el.textContent=t; el.className='net bad'; } }
-function createGame(){
-  if(!room) return;
+function homeMsgInline(t, calm){ var el=document.getElementById('net'); if(el){ el.textContent=t; el.className='net'+(calm?'':' bad'); } }
+async function createGame(){
+  if(!room || busy) return;
   var n = readName(); if(!n) return;
-  var c, tries = 0, taken = function(x){ return room.peers().some(function(p){ return p.presence && p.presence.g===x; }); };
-  do{ c = newCode(); tries++; }while(taken(c) && tries<20);
-  code = c; hosting = true; seenHost = true;
-  hState = {ph:'lobby', r:0, dur:480, pk:packSel.slice(), ts:Date.now()};
-  room.presence({g:c, n:n, h:hState}).catch(function(){});
-  homeMsg=''; lastHtml=''; onChange();
+  busy = true; var c = null;
+  var h0 = {ph:'lobby', r:0, dur:480, pk:packSel.slice(), ts:Date.now()};
+  homeMsgInline('Luodaan peliä…', true);
+  for(var i=0;i<12 && !c;i++){
+    var t = newCode();
+    try{ await room.host(t, {n:n, h:h0}); c = t; }
+    catch(e){ if(e && e.type==='unavailable-id') continue; busy=false; homeMsgInline('Yhteys palvelimeen epäonnistui. Yritä uudelleen.'); return; }
+  }
+  busy = false;
+  if(!c){ homeMsgInline('Koodia ei saatu. Yritä uudelleen.'); return; }
+  hState = h0; code = c; hosting = true; seenHost = true; spyGoneAt = 0;
+  keepAwake(); homeMsg=''; lastHtml=''; onChange();
 }
-function joinGame(){
-  if(!room) return;
+async function joinGame(){
+  if(!room || busy) return;
   var n = readName(); if(!n) return;
   var c = (document.getElementById('code').value||'').trim();
   if(!/^\d{3}$/.test(c)){ homeMsgInline('Koodissa on 3 numeroa.'); return; }
-  code = c; hosting = false; seenHost = false; joinDeadline = Date.now()+7000;
-  room.presence({g:c, n:n}).catch(function(){});
-  homeMsg=''; lastHtml=''; onChange(); render();
+  busy = true; homeMsgInline('Yhdistetään…', true);
+  try{ await room.join(c, {n:n}); }
+  catch(e){
+    busy = false;
+    homeMsgInline(e && e.type==='peer-unavailable' ? 'Peliä ei löytynyt koodilla '+c+'.' : e && e.type==='full' ? 'Peli on täynnä.' : 'Yhteys ei onnistunut. Yritä uudelleen.');
+    return;
+  }
+  busy = false;
+  code = c; hosting = false; seenHost = false; joinDeadline = Date.now()+8000; spyGoneAt = 0;
+  keepAwake(); homeMsg=''; lastHtml=''; onChange(); render();
 }
 function copyLink(btn){
   var url = joinUrl(code);
@@ -546,14 +570,12 @@ $app.addEventListener('click', function(e){
   else if(act==='copy') copyLink(t);
   else if(act==='locs'){ showLocs=!showLocs; render(); }
   else if(act==='pk'){
-    var cur = (code && hosting && h) ? (h.pk||['fi']).slice() : packSel.slice();
-    var ix = cur.indexOf(arg);
-    if(ix>=0){ if(cur.length>1) cur.splice(ix,1); } else cur.push(arg);
+    var cur = [arg];
     if(code && hosting && h && h.ph==='lobby'){ setH({pk:cur}); }
     else if(!code){
       packSel = cur; store('spyfall-packs', JSON.stringify(cur));
       var bs = document.querySelectorAll('[data-pk]');
-      for(var q=0;q<bs.length;q++){ var on = cur.indexOf(bs[q].getAttribute('data-pk'))>=0; bs[q].classList.toggle('on',on); bs[q].setAttribute('aria-pressed',on); }
+      for(var q=0;q<bs.length;q++){ var on = cur.indexOf(bs[q].getAttribute('data-pk'))>=0; bs[q].classList.toggle('on',on); bs[q].setAttribute('aria-checked',on); }
     }
   }
   else if(act==='leave') leaveGame('');
@@ -590,21 +612,182 @@ setInterval(function(){
   if(hosting){ hostLogic(); if(tickN%8===0 && hState) setH({}); }
   else {
     if(!seenHost && Date.now()>joinDeadline){ leaveGame('Peliä ei löytynyt koodilla '+code+'.'); return; }
-    if(seenHost && D && !D.h && hostGoneAt && Date.now()-hostGoneAt>6000){ leaveGame('Isäntä poistui, peli päättyi.'); }
+    if(seenHost && D && !D.h && hostGoneAt && Date.now()-hostGoneAt>30000){ leaveGame('Isäntä poistui, peli päättyi.'); }
   }
 },500);
 
+/* ---------- ruudun pitäminen päällä ---------- */
+function keepAwake(){
+  try{ if(navigator.wakeLock && !wake && document.visibilityState==='visible'){ navigator.wakeLock.request('screen').then(function(l){ wake=l; l.addEventListener('release',function(){ wake=null; }); },function(){}); } }catch(e){}
+}
+document.addEventListener('visibilitychange', function(){ if(code){ keepAwake(); if(room && room.wake) room.wake(); } });
+
+/* ---------- Peer-to-peer-huone (PeerJS / WebRTC) ---------- */
+// Isäntä on "palvelin": hänen puhelimensa pitää pelin tilan ja lähettää sen kaikille.
+// Liittyjät yhdistävät isännän peer-tunnukseen spyfall-<koodi>. Välityspalvelinta tarvitaan vain yhteyden avaamiseen.
+function makeRoom(){
+  var myId = Math.random().toString(36).slice(2,10)+Math.random().toString(36).slice(2,6);
+  var mine = {}, cur = null, role = null, peer = null, conns = {}, hconn = null;
+  var players = {}, cache = [], hs = [], errs = [], leaving = false, retryT = null, lostAt = 0;
+  var ALLOWED = {n:1, ac:1, v:1, gs:1};
+  function clone(o){ return JSON.parse(JSON.stringify(o)); }
+  function parse(d){ try{ return typeof d==='string' ? JSON.parse(d) : null; }catch(e){ return null; } }
+  function clean(patch){
+    var o = {};
+    if(typeof patch.n==='string') o.n = patch.n.slice(0,14);
+    if(patch.v===null || typeof patch.v==='string') o.v = patch.v===null ? null : patch.v.slice(0,12);
+    if(patch.ac===null || (patch.ac && typeof patch.ac.t==='string' && typeof patch.ac.r==='number')) o.ac = patch.ac===null ? null : {t:patch.ac.t.slice(0,20), r:patch.ac.r};
+    if(patch.gs===null || (patch.gs && typeof patch.gs.r==='number' && typeof patch.gs.i==='number')) o.gs = patch.gs===null ? null : {r:patch.gs.r, i:patch.gs.i};
+    return o;
+  }
+  function merge(base, patch){ var np = Object.assign({}, base); Object.keys(patch).forEach(function(k){ if(patch[k]===null) delete np[k]; else np[k]=patch[k]; }); return np; }
+  function build(){
+    var arr = [], t = Date.now();
+    Object.keys(players).forEach(function(id){
+      var pr = players[id]; if(!pr || typeof pr!=='object') return;
+      var p = Object.assign({}, pr); p.g = cur;
+      arr.push({peer:id, by:null, isMe:id===myId, sameTab:id===myId, kind:'viewer', guest:false, presence:p, updatedAt:t});
+    });
+    return arr;
+  }
+  function notify(){ cache = build(); var ch = {peers:cache, joined:[], left:[], updated:[]}; hs.slice().forEach(function(h){ try{ h(ch); }catch(e){ console.error(e); } }); }
+  function fail(e){ errs.slice().forEach(function(f){ try{ f(e); }catch(x){} }); }
+  function reset(){
+    leaving = true;
+    clearTimeout(retryT); retryT = null;
+    Object.keys(conns).forEach(function(k){ try{ conns[k].close(); }catch(e){} });
+    if(hconn){ try{ hconn.close(); }catch(e){} }
+    if(peer){ try{ peer.destroy(); }catch(e){} }
+    conns = {}; hconn = null; peer = null; players = {}; cache = []; cur = null; role = null; mine = {}; lostAt = 0;
+    leaving = false;
+  }
+  function broadcast(){
+    var msg = JSON.stringify({t:'s', p:players});
+    Object.keys(conns).forEach(function(id){ try{ conns[id].send(msg); }catch(e){} });
+  }
+  function hostChanged(){ broadcast(); notify(); }
+
+  function wireHost(p){
+    p.on('connection', function(c){
+      var pid = null;
+      c.on('data', function(d){
+        var m = parse(d); if(!m) return;
+        if(m.t==='j' && typeof m.id==='string' && /^[a-z0-9]{6,24}$/.test(m.id)){
+          if(!players[m.id] && Object.keys(players).length>=12){ try{ c.send(JSON.stringify({t:'full'})); }catch(e){} setTimeout(function(){ try{ c.close(); }catch(e){} },300); return; }
+          if(conns[m.id] && conns[m.id]!==c){ var old = conns[m.id]; delete conns[m.id]; try{ old.close(); }catch(e){} }
+          pid = m.id; conns[pid] = c;
+          players[pid] = merge({}, clean(m.p||{}));
+          hostChanged();
+        } else if(m.t==='p' && pid && players[pid]){
+          players[pid] = merge(players[pid], clean(m.patch||{}));
+          hostChanged();
+        }
+      });
+      var gone = function(){ if(pid && conns[pid]===c){ delete conns[pid]; delete players[pid]; hostChanged(); } };
+      c.on('close', gone); c.on('error', gone);
+    });
+    p.on('disconnected', function(){ if(!leaving){ try{ p.reconnect(); }catch(e){} } });
+    p.on('error', function(e){ if(e && (e.type==='network' || e.type==='server-error' || e.type==='socket-error')) return; console.error(e); });
+  }
+
+  function connectHost(done){
+    if(!peer || peer.destroyed){ peer = new Peer({debug:0}); peer.on('error', onPeerErr); }
+    var go = function(){
+      var c = peer.connect('spyfall-'+cur, {reliable:true}); var opened = false;
+      c.on('open', function(){
+        opened = true; hconn = c; lostAt = 0;
+        c.send(JSON.stringify({t:'j', id:myId, p:clone(mine)}));
+        if(done){ var d = done; done = null; d(null); }
+      });
+      c.on('data', function(d){
+        var m = parse(d); if(!m) return;
+        if(m.t==='s'){ players = m.p || {}; notify(); }
+        else if(m.t==='full'){ if(done){ var f = done; done = null; f({type:'full'}); } }
+        else if(m.t==='bye'){ leaving = true; fail({bye:true}); }
+      });
+      var lost = function(){ if(hconn===c){ hconn = null; hostLost(); } };
+      c.on('close', lost); c.on('error', lost);
+      c._failOpen = function(e){ if(!opened && done){ var f = done; done = null; f(e); } };
+      peer._cc = c;
+    };
+    if(peer.open) go(); else peer.once('open', go);
+  }
+  function onPeerErr(e){
+    if(e && e.type==='peer-unavailable'){
+      if(peer && peer._cc && peer._cc._failOpen) peer._cc._failOpen(e);
+      return;
+    }
+    if(peer && peer._cc && peer._cc._failOpen && !hconn) peer._cc._failOpen(e);
+  }
+  function hostLost(){
+    if(leaving || !cur || role!=='join') return;
+    if(!lostAt) lostAt = Date.now();
+    var attempt = function(){
+      clearTimeout(retryT);
+      if(leaving || !cur || hconn) return;
+      if(Date.now()-lostAt > 15000){ fail({lost:true}); return; }
+      try{ if(peer && peer.disconnected && !peer.destroyed) peer.reconnect(); }catch(e){}
+      connectHost(null);
+      retryT = setTimeout(attempt, 2500);
+    };
+    retryT = setTimeout(attempt, 800);
+  }
+
+  return {
+    peers: function(){ return cache; },
+    onPeers: function(h, err){
+      hs.push(h); if(err) errs.push(err);
+      setTimeout(function(){ try{ h({peers:cache, joined:[], left:[], updated:[]}); }catch(e){} }, 0);
+      return function(){ hs = hs.filter(function(x){ return x!==h; }); };
+    },
+    host: function(code, init){
+      reset();
+      return new Promise(function(res, rej){
+        var finished = false, p = new Peer('spyfall-'+code, {debug:0});
+        var bail = function(e){ if(finished) return; finished = true; try{ p.destroy(); }catch(x){} rej(e); };
+        var to = setTimeout(function(){ bail({type:'timeout'}); }, 12000);
+        p.on('error', function(e){ clearTimeout(to); bail(e); });
+        p.on('open', function(){
+          if(finished) return; finished = true; clearTimeout(to);
+          peer = p; role = 'host'; cur = code; mine = merge({}, init); mine = JSON.parse(JSON.stringify(mine));
+          players = {}; players[myId] = mine; wireHost(p); notify(); res();
+        });
+      });
+    },
+    join: function(code, init){
+      reset();
+      return new Promise(function(res, rej){
+        cur = code; role = 'join'; mine = clone(init); var finished = false;
+        var bail = function(e){ if(finished) return; finished = true; var pp = peer; reset(); rej(e); };
+        var to = setTimeout(function(){ bail({type:'timeout'}); }, 12000);
+        connectHost(function(err){ clearTimeout(to); if(err) bail(err); else { finished = true; res(); } });
+      });
+    },
+    presence: function(patch){
+      if(role==='host'){ mine = merge(mine, JSON.parse(JSON.stringify(patch))); players[myId] = mine; hostChanged(); }
+      else if(role==='join'){
+        var cl = clean(patch); mine = merge(mine, cl);
+        if(hconn && hconn.open){ try{ hconn.send(JSON.stringify({t:'p', patch:cl})); }catch(e){} }
+      }
+      return Promise.resolve();
+    },
+    leave: function(){
+      if(role==='host'){ var bye = JSON.stringify({t:'bye'}); Object.keys(conns).forEach(function(k){ try{ conns[k].send(bye); }catch(e){} }); setTimeout(reset, 250); }
+      else reset();
+    },
+    wake: function(){ try{ if(peer && peer.disconnected && !peer.destroyed) peer.reconnect(); }catch(e){} }
+  };
+}
+
 /* ---------- start ---------- */
 showHome();
-(async function(){
-  try{ room = (window.claude && window.claude.use) ? await window.claude.use('room') : null; }catch(e){ room = null; }
+(function(){
+  try{ if(typeof Peer==='undefined') throw new Error('PeerJS puuttuu'); room = makeRoom(); }catch(e){ console.error(e); room = null; }
   roomChecked = true;
-  if(room){
-    room.onPeers(onChange, function(){ var was=!!code; room=null; if(was) leaveGame('Yhteys katkesi.'); else updateNet(); });
-  }
-  if(!code) updateNet();
+  if(room) room.onPeers(onChange, function(e){ if(code) leaveGame(e && e.bye ? 'Isäntä lopetti pelin.' : 'Yhteys isäntään katkesi.'); });
+  updateNet();
 })();
 })();
 </script>
-
-</body></html>
+</body>
+</html>

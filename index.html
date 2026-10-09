@@ -123,6 +123,25 @@ ul.ll li{font-size:.92rem;padding:6px 0;border-top:1px solid var(--line);overflo
 .hold.card.spy{--bn-line:#c4372c}
 .endimg{border-radius:14px;overflow:hidden;aspect-ratio:3/2;border:2px solid var(--ink)}
 .endimg img{display:block;width:100%;height:100%;object-fit:cover}
+.ll.pics{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 10px}
+ul.ll.pics li{border:0;padding:0;display:flex;flex-direction:column;gap:4px;font-size:.9rem}
+.ll.pics img{display:block;width:100%;aspect-ratio:3/2;object-fit:cover;border-radius:8px;border:1px solid var(--line);background:var(--chip)}
+.stamp.none{color:var(--muted);border-color:var(--muted)}
+details.sheet summary{cursor:pointer;font-weight:600;min-height:32px;display:flex;align-items:center}
+details.sheet[open] summary{margin-bottom:6px}
+.playbar{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.playbar .btn{flex:1}
+.timer.small{font-size:1.5rem;min-width:4.2ch;text-align:right}
+button.pic{font:inherit;color:var(--ink);background:transparent;border:2px solid transparent;border-radius:10px;padding:4px;text-align:left;cursor:pointer;display:flex;flex-direction:column;gap:4px;width:100%}
+button.pic.pick{border-color:var(--accent)}
+button.pic.struck img{opacity:.3;filter:grayscale(1)}
+button.pic.struck span{text-decoration:line-through;color:var(--muted)}
+li.pic{display:flex;flex-direction:column;gap:4px}
+.locbar{position:sticky;bottom:0;display:flex;flex-direction:column;gap:8px;padding:12px 0 calc(8px + env(safe-area-inset-bottom,0px));background:var(--bg);border-top:1px solid var(--line)}
+.locbar .row .btn{flex:1}
+.locs{padding-bottom:0}
+.locs .in::after{content:"";display:block;height:calc(28px + env(safe-area-inset-bottom,0px));flex:none}
+.locbar{z-index:2}
 </style>
 
 </head>
@@ -227,7 +246,7 @@ var fmt = function(s){ return String(Math.floor(s/60)).padStart(2,'0')+':'+Strin
 
 var room = null, roomChecked = false;
 var code = null, hosting = false, hState = null, D = null;
-var busy = false, wake = null, spyGoneAt = 0, seenHost = false, hostGoneAt = 0, joinDeadline = 0, off = Infinity, lastTs = 0, lastHtml = '', tickN = 0, hostK = 0, lastLoc = -1;
+var lastPh = '', confirmEnd = false, busy = false, wake = null, spyGoneAt = 0, seenHost = false, hostGoneAt = 0, joinDeadline = 0, off = Infinity, lastTs = 0, lastHtml = '', tickN = 0, hostK = 0, lastLoc = -1;
 var revealed = false, guessing = false, guessPick = null, struck = {};
 var order = {}, orderN = 0, homeMsg = '', showLocs = false, packSel = ['fi'];
 try{ var ps0 = JSON.parse(store('spyfall-packs')||'null'); if(Array.isArray(ps0)){ ps0 = ps0.filter(function(x){return x==='fi'||x==='cl';}); if(ps0.length) packSel = [ps0[0]]; } }catch(e){}
@@ -267,6 +286,7 @@ function voteOf(p,h){ var m=/^(\d+):([yn])$/.exec(String(p.pr.v||'')); return (m
 function onChange(){
   var d = derive(); if(!d) return;
   D = d;
+  if(d.h && d.h.ph!==lastPh){ lastPh = d.h.ph; showLocs = false; guessing = false; guessPick = null; confirmEnd = false; }
   if(d.h){
     seenHost = true; hostGoneAt = 0;
     if(d.h.ts!==lastTs){ lastTs=d.h.ts; off=Math.min(off, Date.now()-d.h.ts); }
@@ -299,7 +319,7 @@ function hostLogic(){
   var h = hState; if(!h || !D) return;
   var ps = D.players;
   if(h.ph==='play' || h.ph==='vote'){
-    if(Date.now()>=h.ends){ endGame({w:'spy', why:'time'}); return; }
+    if(h.ends && Date.now()>=h.ends){ endGame({w:'none', why:'time'}); return; }
     var spyId = null; for(var k in h.a) if(h.a[k]===-1) spyId=k;
     if(spyId && !ps.some(function(p){return p.id===spyId;})){ if(!spyGoneAt) spyGoneAt=Date.now(); if(Date.now()-spyGoneAt>30000){ spyGoneAt=0; endGame({w:'crew', why:'spyleft'}); return; } } else { spyGoneAt=0; }
     for(var i=0;i<ps.length;i++){
@@ -307,24 +327,6 @@ function hostLogic(){
       if(g && typeof g==='object' && g.r===h.r && typeof g.i==='number' && h.a[p.id]===-1){
         endGame({w: g.i===h.loc?'spy':'crew', why: g.i===h.loc?'guess':'badguess', gs:g.i}); return;
       }
-    }
-  }
-  if(h.ph==='play'){
-    for(var j=0;j<ps.length;j++){
-      var q=ps[j], ac=q.pr.ac;
-      if(ac && typeof ac==='object' && ac.r===h.r && ac.t!==q.id && inGame(h,q) && ps.some(function(x){return x.id===ac.t && inGame(h,x);})){
-        hostK++; setH({ph:'vote', acc:{t:ac.t, b:q.id, k:hostK}, note:null}); return;
-      }
-    }
-  }
-  if(h.ph==='vote'){
-    var t = h.acc && ps.filter(function(x){return x.id===h.acc.t;})[0];
-    if(!t){ setH({ph:'play', acc:null}); return; }
-    var voters = ps.filter(function(x){ return inGame(h,x) && x.id!==h.acc.t && x.id!==h.acc.b; });
-    var votes = voters.map(function(x){ return voteOf(x,h); });
-    if(votes.indexOf('n')>=0){ setH({ph:'play', acc:null, note: t.name+' ei saanut kaikkien tukea.'}); return; }
-    if(votes.every(function(v){return v==='y';})){
-      endGame(h.a[h.acc.t]===-1 ? {w:'crew', why:'caught'} : {w:'spy', why:'wrongacc', acc:h.acc.t, an:t.name});
     }
   }
 }
@@ -337,9 +339,9 @@ function startGame(){
   var spy = pl[rand(pl.length)].id, a = {}, roles = [0,1,2,3,4,5,6];
   for(var z=roles.length-1;z>0;z--){ var y=rand(z+1), tmp=roles[z]; roles[z]=roles[y]; roles[y]=tmp; }
   pl.forEach(function(p){ a[p.id] = p.id===spy ? -1 : roles.pop(); });
-  var dur = hState.dur || 480;
+  var dur = hState.dur || 0;
   revealed=false; guessing=false; guessPick=null; struck={};
-  setH({ph:'play', r:(hState.r||0)+1, loc:li, a:a, dur:dur, ends:Date.now()+dur*1000, acc:null, res:null, note:null});
+  setH({ph:'play', r:(hState.r||0)+1, loc:li, a:a, dur:dur, start:Date.now(), ends:dur ? Date.now()+dur*1000 : 0, acc:null, res:null, note:null});
 }
 
 /* ---------- screens ---------- */
@@ -347,20 +349,26 @@ function showHome(){
   lastHtml = '';
   var saved = store('spyfall-name') || '';
   var pre = hashCode();
+  var nameIn = function(id){ return '<input type="text" id="'+id+'" maxlength="14" autocomplete="nickname" value="'+esc(saved)+'">'; };
+  var createInner =
+    '<h2>Luo uusi peli</h2>'+
+    '<p class="hint">Sinusta tulee pelin isäntä. Muut liittyvät antamallasi koodilla tai QR-koodilla. Kategorian ja peliajan valitset seuraavassa vaiheessa.</p>'+
+    '<div><label for="cname">Nimesi pelin luojana</label>'+nameIn('cname')+'</div>'+
+    '<button class="btn primary" data-act="create" id="bcreate">Luo peli</button>';
+  var joinCard =
+    '<div class="sheet"><h2>'+(pre ? 'Liity peliin '+esc(pre) : 'Liity peliin')+'</h2>'+
+    '<p class="hint">'+(pre ? 'Koodi on jo täytetty. Kirjoita nimesi ja liity.' : 'Kysy koodi pelin luojalta tai skannaa hänen QR-koodinsa.')+'</p>'+
+    '<div><label for="jname">Nimesi</label>'+nameIn('jname')+'</div>'+
+    '<div><label for="code">Pelin koodi</label><input type="text" id="code" maxlength="3" inputmode="numeric" pattern="[0-9]*" autocomplete="off" spellcheck="false" value="'+esc(pre)+'"></div>'+
+    '<button class="btn'+(pre?' primary':'')+'" data-act="join" id="bjoin">Liity peliin</button></div>';
   $app.innerHTML =
     '<div><p class="tab">Salainen peli · 3–8 pelaajaa</p><h1 class="word">Spyfall</h1></div>'+
-    '<p class="lede">Kaikilla on oma puhelin. Yksi teistä on vakooja, joka ei tiedä missä olette. Löydä hänet ennen kuin hän arvaa paikan.</p>'+
+    (pre ? '' : '<p class="lede">Kaikilla on oma puhelin. Yksi teistä on vakooja, joka ei tiedä missä olette. Löydä hänet ennen kuin hän arvaa paikan.</p>')+
     (homeMsg ? '<p class="note">'+esc(homeMsg)+'</p>' : '')+
-    '<div class="sheet">'+
-      '<div><label for="name">Nimesi</label><input type="text" id="name" maxlength="14" autocomplete="nickname" value="'+esc(saved)+'"></div>'+
-      '<div><p class="lbl">Kategoria</p>'+packChips(packSel,true)+'<p class="hint" id="pkn">Valitse yksi kategoria. Isäntä voi vaihtaa sen myös lobbyssa.</p></div>'+
-      '<button class="btn primary" data-act="create" id="bcreate">Luo peli</button>'+
-      '<div class="or">tai liity</div>'+
-      '<div><label for="code">Pelin koodi</label><input type="text" id="code" maxlength="3" inputmode="numeric" pattern="[0-9]*" autocomplete="off" spellcheck="false" value="'+esc(pre)+'"></div>'+
-      '<button class="btn" data-act="join" id="bjoin">Liity peliin</button>'+
-      '<p class="net" id="net"></p>'+
-    '</div>'+
-    '<p class="hint">Voit myös skannata isännän QR-koodin. Kaikilla pitää olla sama pelisivu auki omalla puhelimellaan.</p>';
+    (pre
+      ? joinCard+'<details class="sheet alt"><summary>Luo sen sijaan oma peli</summary>'+createInner+'</details>'
+      : '<div class="sheet">'+createInner+'</div>'+joinCard)+
+    '<p class="net" id="net"></p>';
   updateNet();
 }
 function updateNet(){
@@ -378,12 +386,28 @@ function packChips(sel, editable){
   }).join('')+'</div>';
 }
 function locsHtml(h){
-  var act = activeIdx(h.pk), body = PACKS.filter(function(P){ return (h.pk||['fi']).indexOf(P.id)>=0; }).map(function(P){
+  var act = activeIdx(h.pk), playing = h.ph==='play';
+  var me = D.players.filter(function(p){return p.me;})[0];
+  var myA = (playing && h.a && me) ? h.a[me.id] : undefined;
+  var inG = myA!==undefined, amSpy = myA===-1, gmode = playing && amSpy && guessing;
+  var pic = function(g){
+    var inner = '<img src="'+locImg(g)+'" alt=""><span>'+esc(LOCS[g][0])+'</span>';
+    if(gmode) return '<li><button class="pic'+(guessPick===g?' pick':'')+'" data-act="gp:'+g+'">'+inner+'</button></li>';
+    if(playing && inG) return '<li><button class="pic'+(struck[g]?' struck':'')+'" data-act="st:'+g+'">'+inner+'</button></li>';
+    return '<li class="pic">'+inner+'</li>';
+  };
+  var body = PACKS.filter(function(P){ return (h.pk||['fi']).indexOf(P.id)>=0; }).map(function(P){
     var items = act.filter(function(g){ return g>=P.off && g<P.off+P.locs.length; });
     if(!items.length) return '';
-    return '<div class="sheet"><h2>'+esc(P.name)+'</h2><ul class="ll">'+items.map(function(g){ return '<li>'+esc(LOCS[g][0])+'</li>'; }).join('')+'</ul></div>';
+    return '<ul class="ll pics">'+items.map(pic).join('')+'</ul>';
   }).join('');
-  return '<div class="locs" role="dialog" aria-label="Paikat pelissä"><div class="in"><div class="top"><h2>Paikat pelissä ('+act.length+')</h2><button class="btn small" data-act="locs">Sulje</button></div>'+body+'</div></div>';
+  var hint = gmode ? 'Valitse paikka ja lukitse arvaus. Väärä arvaus antaa voiton muille.' : (playing && inG ? 'Napauta paikkaa yliviivataksesi sen.' : '');
+  var top = (playing && amSpy && !guessing) ? '<button class="btn" data-act="gopen">Paljasta itsesi ja arvaa paikka</button>' : '';
+  var bar = '';
+  if(gmode) bar += '<div class="row"><button class="btn primary" data-act="glock"'+(guessPick===null?' disabled':'')+'>'+(guessPick===null?'Valitse paikka':'Lukitse: '+esc(LOCS[guessPick][0]))+'</button><button class="btn ghost" data-act="gcancel">Peruuta</button></div>';
+  if(playing && hosting) bar += '<button class="btn'+(confirmEnd?' primary':' ghost')+'" data-act="endround">'+(confirmEnd?'Varmista: lopeta kierros':'Lopeta kierros')+'</button>';
+  return '<div class="locs" role="dialog" aria-label="Paikat pelissä"><div class="in"><div class="top"><h2>Paikat pelissä ('+act.length+')</h2><button class="btn small" data-act="locs">Sulje</button></div>'+
+    (hint?'<p class="hint">'+hint+'</p>':'')+top+'<div class="sheet">'+body+'</div>'+(bar?'<div class="locbar">'+bar+'</div>':'')+'</div></div>';
 }
 function lobbyHtml(h){
   var url = joinUrl(code), svg = qrSvg(url);
@@ -392,7 +416,7 @@ function lobbyHtml(h){
   var list = pl.map(function(p){
     return '<li><span class="pn">'+esc(p.name)+(p.me?'<span class="badge">sinä</span>':'')+(p.id===D.host?'<span class="badge">isäntä</span>':'')+'</span></li>';
   }).join('');
-  var durs = [300,480,600,720].map(function(s){ return '<option value="'+s+'"'+((h.dur||480)===s?' selected':'')+'>'+(s/60)+' min</option>'; }).join('');
+  var durs = [[0,'Ei aikarajaa'],[300,'5 min'],[480,'8 min'],[600,'10 min'],[720,'12 min']].map(function(o){ return '<option value="'+o[0]+'"'+((h.dur||0)===o[0]?' selected':'')+'>'+o[1]+'</option>'; }).join('');
   return '<div><p class="tab">Pelihuone</p><h1 class="word codebig">'+esc(code)+'</h1></div>'+
     (amHost ? '<div class="sheet"><p class="hint">Muut skannaavat koodin tai kirjoittavat pelin koodin sivun alussa.</p>'+
       (svg?'<div class="qr" aria-label="QR-koodi pelin liittymiseen">'+svg+'</div>':'')+
@@ -429,43 +453,11 @@ function roleCardHtml(h, myA, inG){
 }
 function playHtml(h){
   var me = D.players.filter(function(p){return p.me;})[0];
-  var myA = h.a ? h.a[me.id] : undefined, inG = myA!==undefined, amSpy = myA===-1;
-  var out = '<div class="top"><span class="tab">Kierros '+h.r+'</span><span class="timer" id="tm"></span></div><button class="btn small ghost" data-act="locs">Näytä kaikki paikat ('+activeIdx(h.pk).length+')</button>';
-  out += roleCardHtml(h,myA,inG);
-  if(h.note) out += '<p class="note">'+esc(h.note)+'</p>';
-  var rows = D.players.filter(function(p){return inGame(h,p);}).map(function(p){
-    var b = (inG && !p.me && h.ph==='play') ? '<button class="btn small" data-act="acc:'+esc(p.id)+'">Syytä</button>' : '';
-    return '<li><span class="pn">'+esc(p.name)+(p.me?'<span class="badge">sinä</span>':'')+'</span>'+b+'</li>';
-  }).join('');
-  out += '<div class="sheet"><h2>Pelaajat</h2><ul class="pl">'+rows+'</ul><p class="hint">Jokaisella on oma roolinsa. Kysy toiselta pelaajalta kysymys. Syytä, kun olet varma. Kaikkien muiden täytyy hyväksyä syytös.</p></div>';
-  if(amSpy && inG){
-    if(guessing){
-      out += '<div class="sheet"><h2>Arvaa paikka</h2><p class="hint">Väärä arvaus antaa voiton muille.</p><div class="chips">'+
-        activeIdx(h.pk).map(function(i){ return '<button class="chip'+(guessPick===i?' pick':'')+'" data-act="gp:'+i+'">'+esc(LOCS[i][0])+'</button>'; }).join('')+
-        '</div><div class="row"><button class="btn primary" data-act="glock"'+(guessPick===null?' disabled':'')+'>'+(guessPick===null?'Valitse paikka':'Lukitse: '+esc(LOCS[guessPick][0]))+'</button><button class="btn ghost" data-act="gcancel">Peruuta</button></div></div>';
-    } else {
-      out += '<button class="btn" data-act="gopen">Arvaa paikka</button>';
-    }
-  }
-  if(!(amSpy && guessing)){
-    out += '<div class="sheet"><h2>Paikat</h2><p class="hint">Napauta paikkaa yliviivataksesi sen.</p><div class="chips">'+
-      activeIdx(h.pk).map(function(i){ return '<button class="chip'+(struck[i]?' struck':'')+'" data-act="st:'+i+'">'+esc(LOCS[i][0])+'</button>'; }).join('')+'</div></div>';
-  }
-  if(h.ph==='vote' && h.acc){
-    var a = h.acc, tName = nameOf(a.t), bName = nameOf(a.b);
-    var voters = D.players.filter(function(x){ return inGame(h,x) && x.id!==a.t && x.id!==a.b; });
-    var yes = voters.filter(function(x){return voteOf(x,h)==='y';}).length;
-    var mine = voteOf(me,h), body;
-    if(me.id===a.t) body = '<p>Sinua syytetään. Muut äänestävät.</p>';
-    else if(me.id===a.b) body = '<p>Odotetaan muiden päätöstä.</p>';
-    else if(!inG) body = '<p class="hint">Seuraat äänestystä.</p>';
-    else if(mine) body = '<p>Äänesi: <b>'+(mine==='y'?'Kyllä':'Ei')+'</b>. Odotetaan muita.</p>';
-    else body = '<div class="row"><button class="btn primary" data-act="v:y">Kyllä, syytä</button><button class="btn" data-act="v:n">Ei</button></div>';
-    out += '<div class="pad-vote"></div><div class="vote" role="dialog" aria-label="Äänestys"><h2>'+esc(bName)+' syyttää: '+esc(tName)+'</h2><p class="hint">Hyväksyneet '+yes+' / '+voters.length+'</p>'+body+'</div>';
-  }
-  return out;
+  var myA = h.a ? h.a[me.id] : undefined, inG = myA!==undefined;
+  return roleCardHtml(h,myA,inG)+
+    '<div class="playbar"><button class="btn" data-act="locs">Paikat ('+activeIdx(h.pk).length+')</button>'+(h.ends?'<span class="timer small" id="tm"></span>':'')+'</div>';
 }
-var WHY = {time:'Aika loppui.', guess:'Vakooja arvasi paikan oikein.', badguess:'Vakooja arvasi väärin.', caught:'Vakooja jäi kiinni.', wrongacc:'Syytetty ei ollut vakooja.', spyleft:'Vakooja poistui pelistä.'};
+var WHY = {manual:'Isäntä lopetti kierroksen.', time:'Aika loppui. Selvittäkää puhumalla, kuka oli vakooja.', guess:'Vakooja arvasi paikan oikein.', badguess:'Vakooja arvasi väärin.', caught:'Vakooja jäi kiinni.', wrongacc:'Syytetty ei ollut vakooja.', spyleft:'Vakooja poistui pelistä.'};
 function endHtml(h){
   var r = h.res || {}, me = D.players.filter(function(p){return p.me;})[0];
   var spyWon = r.w==='spy';
@@ -478,7 +470,7 @@ function endHtml(h){
   if(r.why==='wrongacc') facts += '<dt>Syytetty</dt><dd>'+esc(r.an||'')+'</dd>';
   return '<div><p class="tab">Kierros '+h.r+' päättyi</p></div>'+
     '<div class="endimg"><img src="'+locImg(h.loc)+'" alt=""></div>'+
-    '<span class="stamp'+(spyWon?'':' ok')+'">'+(spyWon?'Vakooja voitti':'Tiimi voitti')+'</span>'+
+    '<span class="stamp'+(r.w==='none'?' none':(spyWon?'':' ok'))+'">'+(r.w==='none'?'Kierros päättyi':(spyWon?'Vakooja voitti':'Tiimi voitti'))+'</span>'+
     '<p>'+esc(WHY[r.why]||'')+'</p>'+
     '<div class="sheet"><dl class="facts">'+facts+'</dl></div>'+
     '<div class="sheet"><h2>Roolit</h2><ul class="pl">'+rows+'</ul></div>'+
@@ -496,35 +488,40 @@ function render(){
   if(D && D.h && showLocs) html += locsHtml(D.h);
   if(html===lastHtml) { updateTimer(); return; }
   lastHtml = html;
+  var oldLocs = document.querySelector('.locs'), sc = oldLocs ? oldLocs.scrollTop : 0;
   $app.innerHTML = html;
+  var newLocs = document.querySelector('.locs'); if(newLocs && sc) newLocs.scrollTop = sc;
   updateTimer();
 }
 function updateTimer(){
-  var el = document.getElementById('tm'); if(!el || !D || !D.h || !D.h.ends) return;
+  var el = document.getElementById('tm'); if(!el || !D || !D.h || !D.h.start) return;
   var hostNow = Date.now() - (hosting ? 0 : (isFinite(off)?off:0));
-  var s = Math.max(0, Math.ceil((D.h.ends-hostNow)/1000));
-  el.textContent = fmt(s);
-  el.classList.toggle('low', s<=60);
+  if(D.h.ends){
+    var s = Math.max(0, Math.ceil((D.h.ends-hostNow)/1000));
+    el.textContent = fmt(s); el.classList.toggle('low', s<=60);
+  } else {
+    el.textContent = fmt(Math.max(0, Math.floor((hostNow-D.h.start)/1000))); el.classList.remove('low');
+  }
 }
 
 /* ---------- actions ---------- */
 function leaveGame(msg){
   if(room) room.leave();
   code=null; hosting=false; hState=null; D=null; seenHost=false; hostGoneAt=0; off=Infinity; lastTs=0;
-  revealed=false; guessing=false; guessPick=null; struck={}; order={}; orderN=0; showLocs=false;
+  revealed=false; guessing=false; guessPick=null; struck={}; order={}; orderN=0; showLocs=false; lastPh='';
   homeMsg = msg||''; showHome();
 }
-function readName(){
-  var el = document.getElementById('name'); var n = el ? el.value.trim().slice(0,14) : '';
+function readName(id){
+  var el = document.getElementById(id); var n = el ? el.value.trim().slice(0,14) : '';
   if(!n){ if(el) el.focus(); homeMsgInline('Kirjoita ensin nimesi.'); return ''; }
   store('spyfall-name', n); return n;
 }
 function homeMsgInline(t, calm){ var el=document.getElementById('net'); if(el){ el.textContent=t; el.className='net'+(calm?'':' bad'); } }
 async function createGame(){
   if(!room || busy) return;
-  var n = readName(); if(!n) return;
+  var n = readName('cname'); if(!n) return;
   busy = true; var c = null;
-  var h0 = {ph:'lobby', r:0, dur:480, pk:packSel.slice(), ts:Date.now()};
+  var h0 = {ph:'lobby', r:0, dur:0, pk:packSel.slice(), ts:Date.now()};
   homeMsgInline('Luodaan peliä…', true);
   for(var i=0;i<12 && !c;i++){
     var t = newCode();
@@ -538,7 +535,7 @@ async function createGame(){
 }
 async function joinGame(){
   if(!room || busy) return;
-  var n = readName(); if(!n) return;
+  var n = readName('jname'); if(!n) return;
   var c = (document.getElementById('code').value||'').trim();
   if(!/^\d{3}$/.test(c)){ homeMsgInline('Koodissa on 3 numeroa.'); return; }
   busy = true; homeMsgInline('Yhdistetään…', true);
@@ -568,7 +565,7 @@ $app.addEventListener('click', function(e){
   if(act==='create') createGame();
   else if(act==='join') joinGame();
   else if(act==='copy') copyLink(t);
-  else if(act==='locs'){ showLocs=!showLocs; render(); }
+  else if(act==='locs'){ showLocs=!showLocs; if(!showLocs){ guessing=false; guessPick=null; } render(); }
   else if(act==='pk'){
     var cur = [arg];
     if(code && hosting && h && h.ph==='lobby'){ setH({pk:cur}); }
@@ -580,6 +577,10 @@ $app.addEventListener('click', function(e){
   }
   else if(act==='leave') leaveGame('');
   else if(act==='start' && hosting) startGame();
+  else if(act==='endround' && hosting && h && h.ph==='play'){
+    if(!confirmEnd){ confirmEnd = true; render(); setTimeout(function(){ if(confirmEnd){ confirmEnd = false; render(); } }, 4000); }
+    else { confirmEnd = false; endGame({w:'none', why:'manual'}); }
+  }
   else if(act==='again' && hosting){ setH({ph:'lobby', res:null, acc:null, a:null, loc:null, note:null}); }
   else if(act==='acc' && h && me && h.ph==='play'){ room.presence({ac:{t:arg, r:h.r}}).catch(function(){}); }
   else if(act==='v' && h && h.acc && me){ room.presence({v:h.acc.k+':'+arg}).catch(function(){}); }
@@ -587,7 +588,7 @@ $app.addEventListener('click', function(e){
   else if(act==='gopen'){ guessing=true; guessPick=null; render(); }
   else if(act==='gcancel'){ guessing=false; guessPick=null; render(); }
   else if(act==='gp'){ guessPick=+arg; render(); }
-  else if(act==='glock' && h && guessPick!==null){ room.presence({gs:{r:h.r, i:guessPick}}).catch(function(){}); guessing=false; }
+  else if(act==='glock' && h && guessPick!==null){ room.presence({gs:{r:h.r, i:guessPick}}).catch(function(){}); guessing=false; showLocs=false; render(); }
 });
 $app.addEventListener('change', function(e){
   if(e.target.id==='dur' && hosting) setH({dur:+e.target.value});

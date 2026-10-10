@@ -32,6 +32,14 @@ body{-webkit-text-size-adjust:100%}
   color-scheme:dark;
 }
 *{box-sizing:border-box}
+[hidden]{display:none!important}
+.sw{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:48px;cursor:pointer;font-weight:600;font-size:.95rem}
+.sw input{appearance:none;-webkit-appearance:none;flex:none;width:52px;height:30px;border-radius:15px;background:var(--line);position:relative;margin:0;cursor:pointer;transition:background .15s}
+.sw input::after{content:"";position:absolute;top:3px;left:3px;width:24px;height:24px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.35);transition:transform .15s}
+.sw input:checked{background:var(--accent)}
+.sw input:checked::after{transform:translateX(22px)}
+.sw input:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){.sw input,.sw input::after{transition:none}}
 .topbar{max-width:30rem;margin:0 auto 10px;display:flex;justify-content:flex-end}
 .topbar[hidden]{display:none}
 .fsbtn{display:inline-flex;align-items:center;gap:8px;min-height:36px;padding:4px 12px;font:inherit;font-size:.85rem;color:var(--ink);background:transparent;border:1px solid var(--line);border-radius:4px;cursor:pointer}
@@ -158,7 +166,7 @@ li.pic{display:flex;flex-direction:column;gap:4px}
 'use strict';
 
 // Public address of this page, used for the QR code. Filled in after first publish.
-var BASE = '';
+var BASE = 'https://foxnovastudio.github.io/spy/';
 
 var FI = [
   ['Lentokone',['Lentäjä','Lentoemäntä','Turvamies','Liikematkustaja','Pelokas matkustaja','Lapsi','Ensimmäisen luokan matkustaja']],
@@ -259,7 +267,7 @@ try{ var ps0 = JSON.parse(store('spyfall-packs')||'null'); if(Array.isArray(ps0)
 function store(k,v){ try{ if(v===undefined) return localStorage.getItem(k); localStorage.setItem(k,v); }catch(e){ return null; } }
 function hashCode(){ var m = /^#(\d{3})$/.exec(location.hash||''); if(m) return m[1]; var q = /[?&]join=(\d{3})(?:&|$)/.exec(location.search||''); return q ? q[1] : ''; }
 function newCode(){ return String(100+rand(900)); }
-function joinUrl(c){ var b = BASE || String(location.href).split('#')[0].split('?')[0]; return b + '#' + c; }
+function joinUrl(c){ var b = BASE || String(location.href).split('#')[0].split('?')[0]; return b + '?join=' + c; }
 function qrSvg(text){
   try{ if(typeof qrcode!=='function') return ''; var q=qrcode(0,'M'); q.addData(text); q.make(); return q.createSvgTag({cellSize:4,margin:0,scalable:true}); }
   catch(e){ return ''; }
@@ -271,19 +279,23 @@ function derive(){
   var all = room.peers().filter(function(p){ return p.kind==='viewer' && p.presence && p.presence.g===code && !(p.isMe && !p.sameTab); });
   all.forEach(function(p){ if(order[p.peer]===undefined) order[p.peer]=orderN++; });
   all.sort(function(a,b){ return order[a.peer]-order[b.peer]; });
-  var seen = {};
-  var players = all.map(function(p){
-    var n = String(p.presence.n||'Pelaaja').slice(0,14);
+  var seen = {}, players = [], watchers = [], meP = null;
+  all.forEach(function(p){
+    var ob = !!p.presence.ob;
+    var n = String(p.presence.n || (ob ? 'Pelinjohtaja' : 'Pelaaja')).slice(0,14);
     seen[n] = (seen[n]||0)+1;
-    return {id:p.peer, name: seen[n]>1 ? n+' '+seen[n] : n, me:p.isMe, pr:p.presence};
+    var o = {id:p.peer, name: seen[n]>1 ? n+' '+seen[n] : n, me:p.isMe, pr:p.presence, ob:ob};
+    if(o.me) meP = o;
+    (ob ? watchers : players).push(o);
   });
   var hp = all.filter(function(p){ return p.presence.h && typeof p.presence.h==='object'; })[0];
-  return {players:players, host: hp?hp.peer:null, h: hp?hp.presence.h:null};
+  return {players:players, watchers:watchers, me:meP, host: hp?hp.peer:null, h: hp?hp.presence.h:null};
 }
 function setH(patch){
   hState = Object.assign({}, hState, patch, {ts:Date.now()});
   if(room) room.presence({h:hState}).catch(function(){});
 }
+function idle(){ return !!(D && D.me && D.me.ob); }
 function inGame(h,p){ return !!(h.a && Object.prototype.hasOwnProperty.call(h.a,p.id)); }
 function nameOf(id){ var p = D && D.players.filter(function(x){return x.id===id;})[0]; return p ? p.name : 'Pelaaja'; }
 function voteOf(p,h){ var m=/^(\d+):([yn])$/.exec(String(p.pr.v||'')); return (m && h.acc && +m[1]===h.acc.k) ? m[2] : null; }
@@ -302,7 +314,7 @@ function onChange(){
 }
 
 function housekeeping(){
-  var h = D.h, me = D.players.filter(function(p){return p.me;})[0];
+  var h = D.h, me = D.me;
   if(!h || !me) return;
   var pr = me.pr, clr = {};
   if(pr.ac && (h.ph!=='play' || h.acc)) clr.ac = null;
@@ -358,7 +370,9 @@ function showHome(){
   var createInner =
     '<h2>Luo uusi peli</h2>'+
     '<p class="hint">Sinusta tulee pelin isäntä. Muut liittyvät antamallasi koodilla tai QR-koodilla. Kategorian ja peliajan valitset seuraavassa vaiheessa.</p>'+
-    '<div><label for="cname">Nimesi pelin luojana</label>'+nameIn('cname')+'</div>'+
+    '<label class="sw" for="cplay"><span>Pelaan itse</span><input type="checkbox" id="cplay" role="switch" checked></label>'+
+    '<div id="cnamew"><label for="cname">Nimesi pelin luojana</label>'+nameIn('cname')+'</div>'+
+    '<p class="hint" id="cplayhint">Jos et pelaa, sinulla on vain napit, joilla peli etenee.</p>'+
     '<button class="btn primary" data-act="create" id="bcreate">Luo peli</button>';
   var joinCard =
     '<div class="sheet"><h2>'+(pre ? 'Liity peliin '+esc(pre) : 'Liity peliin')+'</h2>'+
@@ -375,6 +389,7 @@ function showHome(){
       : '<div class="sheet">'+createInner+'</div>'+joinCard)+
     '<p class="net" id="net"></p>';
   updateNet();
+  if(pre){ var jn = document.getElementById('jname'); if(jn){ try{ jn.focus({preventScroll:false}); }catch(e){} } }
 }
 function updateNet(){
   var el = document.getElementById('net'); if(!el) return;
@@ -392,7 +407,7 @@ function packChips(sel, editable){
 }
 function locsHtml(h){
   var act = activeIdx(h.pk), playing = h.ph==='play';
-  var me = D.players.filter(function(p){return p.me;})[0];
+  var me = D.me;
   var myA = (playing && h.a && me) ? h.a[me.id] : undefined;
   var inG = myA!==undefined, amSpy = myA===-1, gmode = playing && amSpy && guessing;
   var pic = function(g){
@@ -430,7 +445,7 @@ function lobbyHtml(h){
     (amHost ? '<div class="sheet"><p class="lbl">Kategoria</p>'+packChips(h.pk||['fi'],true)+'</div>' : '<p class="hint">Kategoriat: '+esc(packLabel(h.pk))+'</p>')+
     '<button class="btn small ghost" data-act="locs">Näytä kaikki paikat ('+activeIdx(h.pk).length+')</button>'+
     (amHost
-      ? '<div class="sheet"><div><label for="dur">Peliaika</label><select id="dur" data-act="dur">'+durs+'</select></div>'+
+      ? (idle() ? '<p class="note">Et pelaa. Sinulla on vain napit, joilla peli etenee.</p>' : '')+'<div class="sheet"><div><label for="dur">Peliaika</label><select id="dur" data-act="dur">'+durs+'</select></div>'+
         '<button class="btn primary" data-act="start"'+((pl.length<3||pl.length>8)?' disabled':'')+'>Aloita peli</button>'+
         (pl.length<3?'<p class="hint">Tarvitaan vähintään 3 pelaajaa.</p>':'')+(pl.length>8?'<p class="hint">Pelissä voi olla enintään 8 pelaajaa.</p>':'')+'</div>'
       : '<p class="hint">Odotetaan, että isäntä aloittaa pelin.</p>')+
@@ -459,14 +474,19 @@ function roleCardHtml(h, myA, inG){
   '</button>';
 }
 function playHtml(h){
-  var me = D.players.filter(function(p){return p.me;})[0];
+  var me = D.me;
+  var bar = '<div class="playbar"><button class="btn" data-act="locs">Paikat ('+activeIdx(h.pk).length+')</button>'+(h.ends||(idle()&&h.start)?'<span class="timer small" id="tm"></span>':'')+'</div>';
+  if(idle()){
+    return '<div><p class="tab">Pelinjohtaja · kierros '+h.r+'</p></div>'+
+      '<div class="sheet"><h2>Peli käynnissä</h2><p class="hint">Et pelaa tällä kierroksella. Lopeta kierros, kun olette valmiit.</p></div>'+bar+
+      '<button class="btn'+(confirmEnd?' primary':'')+'" data-act="endround">'+(confirmEnd?'Varmista: lopeta kierros':'Lopeta kierros')+'</button>';
+  }
   var myA = h.a ? h.a[me.id] : undefined, inG = myA!==undefined;
-  return roleCardHtml(h,myA,inG)+
-    '<div class="playbar"><button class="btn" data-act="locs">Paikat ('+activeIdx(h.pk).length+')</button>'+(h.ends?'<span class="timer small" id="tm"></span>':'')+'</div>';
+  return roleCardHtml(h,myA,inG)+bar;
 }
 var WHY = {manual:'Isäntä lopetti kierroksen.', time:'Aika loppui. Selvittäkää puhumalla, kuka oli vakooja.', guess:'Vakooja arvasi paikan oikein.', badguess:'Vakooja arvasi väärin.', caught:'Vakooja jäi kiinni.', wrongacc:'Syytetty ei ollut vakooja.', spyleft:'Vakooja poistui pelistä.'};
 function endHtml(h){
-  var r = h.res || {}, me = D.players.filter(function(p){return p.me;})[0];
+  var r = h.res || {}, me = D.me;
   var spyWon = r.w==='spy';
   var rows = D.players.filter(function(p){return inGame(h,p);}).map(function(p){
     var a = h.a[p.id];
@@ -526,13 +546,14 @@ function readName(id){
 function homeMsgInline(t, calm){ var el=document.getElementById('net'); if(el){ el.textContent=t; el.className='net'+(calm?'':' bad'); } }
 async function createGame(){
   if(!room || busy) return;
-  var n = readName('cname'); if(!n) return;
+  var pk = document.getElementById('cplay'), plays = !pk || pk.checked;
+  var n = plays ? readName('cname') : 'Pelinjohtaja'; if(!n) return;
   busy = true; var c = null;
   var h0 = {ph:'lobby', r:0, dur:0, pk:packSel.slice(), ts:Date.now()};
   homeMsgInline('Luodaan peliä…', true);
   for(var i=0;i<12 && !c;i++){
     var t = newCode();
-    try{ await room.host(t, {n:n, h:h0}); c = t; }
+    try{ await room.host(t, plays ? {n:n, h:h0} : {n:n, ob:1, h:h0}); c = t; }
     catch(e){ if(e && e.type==='unavailable-id') continue; busy=false; homeMsgInline('Yhteys palvelimeen epäonnistui. Yritä uudelleen.'); return; }
   }
   busy = false;
@@ -562,7 +583,7 @@ $app.addEventListener('click', function(e){
   var act = t.getAttribute('data-act'), arg = '';
   var i = act.indexOf(':'); if(i>0){ arg = act.slice(i+1); act = act.slice(0,i); }
   var h = D && D.h;
-  var me = D && D.players.filter(function(p){return p.me;})[0];
+  var me = D && D.me;
   if(act==='create') createGame();
   else if(act==='join') joinGame();
   else if(act==='locs'){ showLocs=!showLocs; if(!showLocs){ guessing=false; guessPick=null; } render(); }
@@ -591,6 +612,7 @@ $app.addEventListener('click', function(e){
   else if(act==='glock' && h && guessPick!==null){ room.presence({gs:{r:h.r, i:guessPick}}).catch(function(){}); guessing=false; showLocs=false; render(); }
 });
 $app.addEventListener('change', function(e){
+  if(e.target.id==='cplay'){ var w = document.getElementById('cnamew'); if(w) w.hidden = !e.target.checked; return; }
   if(e.target.id==='dur' && hosting) setH({dur:+e.target.value});
 });
 $app.addEventListener('input', function(e){
